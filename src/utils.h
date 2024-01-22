@@ -8,3 +8,4 @@ std::string sha256(std::string message);
 std::string sha256String(std::string message);
 std::string sha512(std::string message);
 std::string sha512String(std::string message);
+std::string sha2toString(std::string digest);

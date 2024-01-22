@@ -80,3 +80,13 @@ std::string sha512String(std::string message) {
 
   return encoded;
 }
+
+std::string sha2toString(std::string digest) {
+  std::string encoded;
+
+  CryptoPP::StringSource ss(
+      digest, true,
+      new CryptoPP::HexEncoder(new CryptoPP::StringSink(encoded)));
+
+  return encoded;
+}
