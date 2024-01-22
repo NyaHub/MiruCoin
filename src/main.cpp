@@ -1,6 +1,8 @@
+#include "./utils.h"
 #include <iostream>
-#include <sqlite3.h>
 
-int main(int argc, char* argv[]) {
-    std::cout << "Hello, world!" << std::endl;
+int main(int, char **) {
+  std::cout << sha256String("some string") << std::endl;
+  std::cout << sha512String("some string") << std::endl;
+  return 0;
 }
