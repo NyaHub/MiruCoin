@@ -1,3 +1,5 @@
+#ifndef LEDGER_LIB
+#define LEDGER_LIB
 #include <crypto++/config_int.h>
 #include <crypto++/hex.h>
 #include <crypto++/oids.h>
@@ -75,3 +77,4 @@ public:
 };
 
 } // namespace Mirucoin
+#endif

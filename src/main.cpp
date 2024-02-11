@@ -1,32 +1,36 @@
 #include "./blockchain.h"
 #include "./ledger.h"
 #include "./utils.h"
-#include <cstdio>
-#include <iostream>
-#include <ostream>
+#include "tx.h"
 #include <string>
+#include <vector>
 
 int main(int, char **) {
-  // Mirucoin::Blockchain chain{"chain.sqlite"};
+  Mirucoin::Blockchain chain{(std::string) "chain.sqlite"};
 
-  // Mirucoin::Block blk{chain.getlastHash(), chain.getLastIndex(), "first
-  // block"};
+  Mirucoin::Tx tx = Mirucoin::Tx("me", "alice", 12, 0.1, "");
+  std::vector<Mirucoin::Tx> txs;
+  txs.push_back(std::move(tx));
 
-  // chain.addBlock(&blk);
+  Mirucoin::Block blk{chain.getlastHash(), chain.getLastIndex(),
+                      std::move(txs)};
 
-  // chain.print();
+  chain.addBlock(blk);
 
-  Mirucoin::Ledger wallet;
+  chain.print();
 
-  std::string message = "Some message";
+  // Mirucoin::Ledger wallet;
 
-  printf("PrivateKey: %s\nPublicKey: %s\n", wallet.getDerPrivate().c_str(),
-         wallet.getDerPublic().c_str());
+  // std::string message = "Some message";
 
-  std::string sing = wallet.sign(message);
+  // printf("PrivateKey: %s\nPublicKey: %s\n", wallet.getDerPrivate().c_str(),
+  //        wallet.getDerPublic().c_str());
 
-  std::cout << sing << std::endl;
-  std::cout << wallet.verify(message, sing, wallet.getDerPublic()) << std::endl;
+  // std::string sing = wallet.sign(message);
+
+  // std::cout << sing << std::endl;
+  // std::cout << wallet.verify(message, sing, wallet.getDerPublic()) <<
+  // std::endl;
 
   return 0;
 }

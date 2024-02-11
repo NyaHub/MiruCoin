@@ -1,13 +1,18 @@
+#ifndef BLOCK_LIB
+#define BLOCK_LIB
 #include "./json.hpp"
+#include "./tx.h"
 #include "./utils.h"
 #include "merkletree.hpp"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <iostream>
 #include <memory>
 #include <openssl/sha.h>
 #include <string>
+#include <vector>
 
 namespace Mirucoin {
 struct BlockEntity {
@@ -18,7 +23,6 @@ struct BlockEntity {
   uint64_t nonce;
   uint64_t index;
   time_t timestamp;
-  std::string data;
 };
 
 class Block {
@@ -29,11 +33,32 @@ private:
   uint64_t nonce;
   uint64_t index;
   time_t timestamp;
-  std::string data;
+  std::vector<Tx> data;
   nlohmann::json header;
 
 public:
-  Block(std::string prevHash, uint64_t index, std::string data) {
+  Block(Block const &a) {
+    this->prevHash = a.prevHash;
+    this->nonce = a.nonce;
+    this->index = a.index;
+    this->timestamp = a.timestamp;
+    this->data = a.data;
+
+    for (int i = 0; i < this->data.size(); i++) {
+      tree.insert(merkle::Tree::Hash(data[i].getHash()));
+    }
+
+    this->header = {{"prevHash", this->prevHash},
+                    {"index", this->index},
+                    {"timestamp", this->timestamp},
+                    {"nonce", this->nonce},
+                    {"merkleRoot", this->tree.root().to_string()}};
+
+    this->hash = sha256String(this->header.dump());
+
+    // if (a.hash != this->hash) throw std::exception()
+  };
+  Block(std::string prevHash, uint64_t index, std::vector<Tx> data) {
     this->prevHash = prevHash;
     this->data = data;
     this->index = index;
@@ -43,20 +68,22 @@ public:
 
     this->nonce = std::rand();
 
-    std::string hashedData = sha256String(this->data);
+    std::cout << data.size() << std::endl;
 
-    this->header = {
-        {"prevHash", this->prevHash},
-        {"index", this->index},
-        {"timestamp", this->timestamp},
-        {"nonce", this->nonce},
-        {"merkleRoot", hashedData}
-        // {"merkleRoot", this->tree.root().to_string()}
-    };
+    for (int i = 0; i < this->data.size(); i++) {
+      tree.insert(merkle::Tree::Hash(this->data[i].getHash()));
+      std::cout << this->data[i].getHash() << std::endl;
+    }
+
+    this->header = {{"prevHash", this->prevHash},
+                    {"index", this->index},
+                    {"timestamp", this->timestamp},
+                    {"nonce", this->nonce},
+                    {"merkleRoot", this->tree.root().to_string()}};
 
     this->hash = sha256String(this->header.dump());
   }
-  Block(std::string prevHash, uint64_t index, std::string data,
+  Block(std::string prevHash, uint64_t index, std::vector<Tx> data,
         time_t timestamp, uint64_t nonce) {
     this->prevHash = prevHash;
     this->nonce = nonce;
@@ -64,16 +91,15 @@ public:
     this->timestamp = timestamp;
     this->data = data;
 
-    std::string hashedData = sha256String(this->data);
+    for (int i = 0; i < this->data.size(); i++) {
+      tree.insert(merkle::Tree::Hash(data[i].getHash()));
+    }
 
-    this->header = {
-        {"prevHash", this->prevHash},
-        {"index", this->index},
-        {"timestamp", this->timestamp},
-        {"nonce", this->nonce},
-        {"merkleRoot", hashedData}
-        // {"merkleRoot", this->tree.root().to_string()}
-    };
+    this->header = {{"prevHash", this->prevHash},
+                    {"index", this->index},
+                    {"timestamp", this->timestamp},
+                    {"nonce", this->nonce},
+                    {"merkleRoot", this->tree.root().to_string()}};
 
     this->hash = sha256String(this->header.dump());
   }
@@ -85,34 +111,48 @@ public:
 
   const std::string &getHash() { return hash; }
   const std::string &getPrevHash() { return prevHash; }
-  const std::string &getData() { return data; }
-  std::string getMerkleRoot() { return sha256String(this->data); }
-  //   std::string getMerkleRoot() { return std::move(tree.root().to_string());}
-  std::string getHeader() { return std::move(header.dump()); }
-  uint64_t getNonce() { return nonce; }
-  uint64_t getIndex() { return index; }
-  time_t getTimestamp() { return timestamp; }
+  const std::vector<Tx> &getData() { return data; }
+  const std::string getMerkleRoot() { return tree.root().to_string(); }
+  const std::string getHeader() { return header.dump(); }
+  const uint64_t getNonce() { return nonce; }
+  const uint64_t getIndex() { return index; }
+  const time_t getTimestamp() { return timestamp; }
+
+  nlohmann::json toJson() {
+    std::vector<nlohmann::json> jdata;
+    for (int i = 0; i < data.size(); i++) {
+      jdata.push_back(data[i].toJson());
+    }
+    nlohmann::json blk = {{"header", header}, {"data", jdata}};
+    return blk;
+  }
 
   std::string toString() {
-    nlohmann::json blk = {{"header", header}, {"data", data}};
+    std::vector<nlohmann::json> jdata;
+    for (int i = 0; i < data.size(); i++) {
+      jdata.push_back(data[i].toJson());
+    }
+    nlohmann::json blk = {{"header", header}, {"data", jdata}};
     return blk.dump();
   }
 
-  static std::unique_ptr<Block> createGenesis() {
-    return std::make_unique<Block>("", 0, "this is genesis block");
+  static Block createGenesis() {
+    std::vector<Tx> txs;
+    txs.push_back(Tx("me", "you", 10, 0.1, ""));
+    return Block("", 0, std::move(txs));
   }
 
-  static std::unique_ptr<Block> createBlock(std::string prevHash,
-                                            uint64_t index, std::string data) {
-    return std::make_unique<Block>(prevHash, index, data);
+  static Block createBlock(std::string prevHash, uint64_t index,
+                           std::vector<Tx> data) {
+    return Block(prevHash, index, std::move(data));
   }
-  static std::unique_ptr<Block> createBlock(BlockEntity *blk) {
-    return std::make_unique<Block>(blk->prevHash, blk->index, blk->data,
-                                   blk->timestamp, blk->nonce);
+  static Block createBlock(BlockEntity *blk, std::vector<Tx> data) {
+    return Block(blk->prevHash, blk->index, std::move(data), blk->timestamp,
+                 blk->nonce);
   }
 
-  static int verify(Block *blk, Block *lastblk) {
-    if (blk->getPrevHash() == lastblk->getHash()) {
+  static int verify(Block &blk, Block &lastblk) {
+    if (blk.getPrevHash() == lastblk.getHash()) {
       return 1;
     } else {
       return 0;
@@ -121,9 +161,10 @@ public:
 
   void print() {
     printf("Block %lu\n\thash: %s\n\tprevious hash: %s\n\tnonce: "
-           "%lu\n\ttimestamp: %lu\n\tdata: %s\n",
+           "%lu\n\ttimestamp: %lu\n\tmerkleRoot: %s\n",
            index, hash.c_str(), prevHash.c_str(), nonce, timestamp,
-           data.c_str());
+           tree.root().to_string().c_str());
   }
 };
 } // namespace Mirucoin
+#endif

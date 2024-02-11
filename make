@@ -3,6 +3,6 @@ mkdir -p build &&\
 cd build &&\
 cmake build .. &&\
 make &&\
-clear &&\
+# clear &&\
 ./blockchain &&\
 cd ../
