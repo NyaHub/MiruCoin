@@ -20,7 +20,7 @@ enum ChainStatus {
   InsertError,
 };
 
-auto createDB(std::string db_name) {
+inline auto createDB(std::string db_name) {
   return sqlite_orm::make_storage(
       db_name,
       sqlite_orm::make_table(
@@ -102,6 +102,8 @@ private:
         this->lastBlock = blk;
         length++;
       } else {
+        db.remove<TxEntity>(
+            sqlite_orm::where(sqlite_orm::c(&TxEntity::blockId) == blks[i].id));
         db.remove<BlockEntity>(blks[i].id);
       }
     }
