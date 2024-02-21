@@ -3,6 +3,7 @@
 
 #include "./utils.h"
 #include "json.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
@@ -10,12 +11,15 @@
 #include <string>
 
 namespace Mirucoin {
+#define M_MIRU 100'000'000
+
 struct TxEntity {
   int id;
   std::string payer;
   std::string payee;
   float amount;
-  float fee;
+  double fee;
+  uint32_t gasprice;
   std::string data;
   time_t timestamp;
   std::string hash;
@@ -29,7 +33,8 @@ private:
   std::string payer;
   std::string payee;
   float amount;
-  float fee;
+  double fee;
+  uint32_t gasprice;
   std::string data;
   time_t timestamp;
   nlohmann::json header;
@@ -42,11 +47,12 @@ public:
     this->payer = "";
     this->payee = "";
     this->amount = 0;
-    this->fee = 0;
     this->data = "";
     this->timestamp = 0;
     this->sign = "";
     this->seed = std::rand();
+    this->gasprice = 5;
+    this->fee = (double)(gasprice * size()) / M_MIRU;
 
     this->updateHeader("", "");
   }
@@ -59,15 +65,17 @@ public:
     this->timestamp = a.timestamp;
     this->sign = a.sign;
     this->seed = a.seed;
+    this->gasprice = a.gasprice;
 
     this->updateHeader("", "");
   }
-  Tx(std::string payer, std::string payee, float amount, float fee,
+  Tx(std::string payer, std::string payee, float amount, uint32_t gasprice,
      std::string data, int seed = -1) {
     this->payer = payer;
     this->payee = payee;
     this->amount = amount;
-    this->fee = fee;
+    this->fee = (double)(gasprice * size()) / M_MIRU;
+    this->gasprice = gasprice;
     this->data = data;
     this->timestamp = std::time(nullptr);
     this->sign = "";
@@ -138,6 +146,7 @@ public:
   const std::string &getPayee() const { return this->payee; }
   const float getAmount() const { return this->amount; }
   const float getFee() const { return this->fee; }
+  const uint32_t getGasPrice() const { return this->gasprice; }
   const std::string &getData() const { return this->data; }
   const time_t getTimestamp() const { return this->timestamp; }
   const std::string &getHash() const { return this->hash; }
@@ -152,17 +161,25 @@ public:
   std::string toString() { return this->toJson().dump(); }
 
   static Tx createTx(TxEntity *txe) {
-    Tx tx =
-        Tx(txe->payer, txe->payee, txe->amount, txe->fee, txe->data, txe->seed);
+    Tx tx = Tx(txe->payer, txe->payee, txe->amount, txe->gasprice, txe->data,
+               txe->seed);
     tx.updateHeader("timestamp", txe->timestamp);
     tx.setSign(txe->sign);
     return tx;
   }
   void print() {
     printf("Tx: %s\n\tPayer: %s\n\tPayee: %s\n\tAmount: %f\n\tFee: "
-           "%f\n\tTimestamp: %lu\n\tSign: %s\n\tSeed: %i\n\tData: %s\n",
-           hash.c_str(), payer.c_str(), payee.c_str(), amount, fee, timestamp,
-           sign.c_str(), seed, data.c_str());
+           "%f\n\tGas Price: %i\n\tTimestamp: %lu\n\tSign: %s\n\tSeed: "
+           "%i\n\tData: %s\n",
+           hash.c_str(), payer.c_str(), payee.c_str(), amount, fee, gasprice,
+           timestamp, sign.c_str(), seed, data.c_str());
+  }
+
+  size_t size() {
+    return sizeof(std::string) * payee.size() +
+           sizeof(std::string) * payer.size() + sizeof(float) +
+           sizeof(std::string) * data.size() + sizeof(time_t) +
+           sizeof(std::string) * sign.size() + sizeof(int);
   }
 };
 

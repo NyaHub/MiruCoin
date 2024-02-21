@@ -9,18 +9,6 @@ using namespace std;
 
 int main(int, char **) {
   std::srand(std::time(nullptr));
-  // Mirucoin::Blockchain chain{(std::string) "chain.sqlite"};
-
-  // Mirucoin::Tx tx = Mirucoin::Tx("me", "alice", 12, 0.1, "");
-  // std::vector<Mirucoin::Tx> txs;
-  // txs.push_back(std::move(tx));
-
-  // Mirucoin::Block blk{chain.getlastHash(), chain.getLastIndex(),
-  //                     std::move(txs)};
-
-  // chain.addBlock(blk);
-
-  // chain.print();
 
   // Mirucoin::Ledger wallet;
 
@@ -54,11 +42,16 @@ int main(int, char **) {
 
   walletA.print();
 
-  auto tx = walletA.send(walletB.getAddress(), 5, 0.1);
+  auto tx = walletA.send(walletB.getAddress(), 5, 10);
 
   if (tx.has_value()) {
     chain.addTx(tx.value(), walletA.getDerPublic());
+    walletA.update(chain.getLedger(walletA.getAddress()));
+    walletB.update(chain.getLedger(walletB.getAddress()));
+    walletA.print();
+    walletB.print();
     Block blk = chain.getNewBlock();
+    cout << "Before Mining ... \n";
     blk = miner.mine(blk);
     chain.addBlock(blk, walletA.getAddress());
   }
@@ -79,6 +72,7 @@ int main(int, char **) {
   walletB.update(chain.getLedger(walletB.getAddress()));
 
   walletA.print();
+  walletB.print();
 
   chain.printChain();
 

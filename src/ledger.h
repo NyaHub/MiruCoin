@@ -10,6 +10,7 @@
 #include <cryptopp/filters.h>
 #include <cryptopp/osrng.h>
 #include <cryptopp/xed25519.h>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -41,7 +42,8 @@ public:
     this->lockedIn = a.lockedIn;
   }
   void print() {
-    printf("Wallet: %s\n\tBallance: %f\n", address.c_str(), ballance);
+    printf("Wallet: %s\n\tBallance: %f\n\tLockedIn: %f\n\tLockedOut: %f\n",
+           address.c_str(), ballance, lockedIn, lockedOut);
   }
 };
 
@@ -72,14 +74,15 @@ public:
   const float getLockedOut() { return params.lockedOut; }
   const float getLockedIn() { return params.lockedIn; }
 
-  std::optional<Tx> send(std::string addr, float amount, float fee,
+  std::optional<Tx> send(std::string addr, float amount, uint32_t gasprice,
                          std::string data = "") {
-    if (amount + fee > params.ballance) {
+
+    Tx tx{params.address, addr, amount, gasprice, data};
+    tx.setSign(sign(tx.getHash()));
+
+    if (amount + tx.getFee() > params.ballance) {
       return {};
     }
-
-    Tx tx{params.address, addr, amount, fee, data};
-    tx.setSign(sign(tx.getHash()));
     return tx;
   }
 
@@ -136,8 +139,9 @@ public:
   }
 
   void print() {
-    printf("Wallet: %s\n\tBallance: %f\n", params.address.c_str(),
-           params.ballance);
+    printf("Wallet: %s\n\tBallance: %f\n\tLockedIn: %f\n\tLockedOut: %f\n",
+           params.address.c_str(), params.ballance, params.lockedIn,
+           params.lockedOut);
   }
 };
 

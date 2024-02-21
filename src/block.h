@@ -8,7 +8,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <iostream>
 #include <openssl/sha.h>
 #include <string>
 #include <vector>
@@ -57,7 +56,7 @@ public:
                     {"merkleRoot", this->tree.root().to_string()},
                     {"difficulty", this->diff}};
 
-    this->hash = sha256String(this->header.dump());
+    this->hash = sha512String(this->header.dump());
 
     // if (a.hash != this->hash) throw std::exception()
   };
@@ -81,7 +80,7 @@ public:
                     {"merkleRoot", this->tree.root().to_string()},
                     {"difficulty", this->diff}};
 
-    this->hash = sha256String(this->header.dump());
+    this->hash = sha512String(this->header.dump());
   }
   Block(std::string prevHash, uint64_t index, std::vector<Tx> data, uint diff,
         time_t timestamp, uint64_t nonce) {
@@ -103,13 +102,13 @@ public:
                     {"merkleRoot", this->tree.root().to_string()},
                     {"difficulty", this->diff}};
 
-    this->hash = sha256String(this->header.dump());
+    this->hash = sha512String(this->header.dump());
   }
 
   void updateHeader(uint64_t nonce) {
     header["nonce"] = nonce;
     this->nonce = nonce;
-    this->hash = sha256String(this->header.dump());
+    this->hash = sha512String(this->header.dump());
   }
 
   const std::string &getHash() { return hash; }
@@ -142,7 +141,7 @@ public:
 
   static Block createGenesis(uint diff) {
     std::vector<Tx> txs;
-    txs.push_back(Tx("me", "you", 10, 0.1, "GENESIS"));
+    txs.push_back(Tx("me", "you", 10, 10, "GENESIS"));
     return Block("", 0, std::move(txs), diff);
   }
 

@@ -20,6 +20,7 @@
 namespace Mirucoin {
 #define STORAGE_START_BALLANCE 1000000000
 #define MAX_BLOCK_SIZE 10 * 1024 * 1024
+#define STORAGE_ADDR "Null::"
 
 inline auto createDB(std::string db_name) {
   return sqlite_orm::make_storage(
@@ -43,6 +44,7 @@ inline auto createDB(std::string db_name) {
           sqlite_orm::make_column("payee", &TxEntity::payee),
           sqlite_orm::make_column("amount", &TxEntity::amount),
           sqlite_orm::make_column("fee", &TxEntity::fee),
+          sqlite_orm::make_column("gasprice", &TxEntity::gasprice),
           sqlite_orm::make_column("data", &TxEntity::data),
           sqlite_orm::make_column("timestamap", &TxEntity::timestamp),
           sqlite_orm::make_column("hash", &TxEntity::hash),
@@ -55,7 +57,7 @@ inline auto createDB(std::string db_name) {
 
 class Blockchain {
 private:
-  LedgerEntity storage{"Null::", STORAGE_START_BALLANCE};
+  LedgerEntity storage{STORAGE_ADDR, STORAGE_START_BALLANCE};
   std::unordered_map<std::string, LedgerEntity> wallets;
   std::unordered_map<std::string, Tx> txspool;
   std::optional<Block> lastBlock;
@@ -80,11 +82,12 @@ private:
       auto &txs = blk->getData();
 
       for (int i = 0; i < txs.size(); i++) {
-        db.insert(TxEntity{-1, txs[i].getPayer(), txs[i].getPayee(),
-                           txs[i].getAmount(), txs[i].getFee(),
-                           txs[i].getData(), txs[i].getTimestamp(),
-                           txs[i].getHash(), txs[i].getSign(), txs[i].getSeed(),
-                           std::make_unique<int>(block.id)});
+        db.insert(TxEntity{
+            -1, txs[i].getPayer(), txs[i].getPayee(), txs[i].getAmount(),
+            txs[i].getFee(), txs[i].getGasPrice(), txs[i].getData(),
+            txs[i].getTimestamp(), txs[i].getHash(), txs[i].getSign(),
+            txs[i].getSeed(), std::make_unique<int>(block.id)});
+        updateWallet(txs[i], 1);
       }
       db.commit();
     } catch (...) {
@@ -114,6 +117,58 @@ private:
       }
       wallets[storage.address].ballance += txs[i].getFee();
     }
+  }
+
+  // flag = 0 - add to mempool, 1 - add to chain, 2 - delete from chain
+  void updateWallets(std::vector<Tx> &txs, uint8_t flag = 0) {
+    for (int i = 0; i < txs.size(); i++) {
+      updateWallet(txs[i], flag);
+    }
+  }
+
+  void updateWallet(Tx tx, uint8_t flag = 0) {
+    {
+      float li = 0;
+      float b = 0;
+      if (flag == 0) {
+        li += tx.getAmount();
+      } else if (flag == 1) {
+        b += tx.getAmount();
+        li -= tx.getAmount();
+      } else if (flag == 2) {
+        li -= tx.getAmount();
+      }
+      if (wallets.contains(tx.getPayee())) {
+        wallets[tx.getPayee()].ballance += b;
+        wallets[tx.getPayee()].lockedIn += li;
+      } else {
+        LedgerEntity w{tx.getPayee(), b, 0, li};
+        wallets.insert({tx.getPayee(), w});
+      }
+    }
+    {
+      float lo = 0;
+      float b = 0;
+      auto l = tx.getAmount() + tx.getFee();
+      if (flag == 0) {
+        lo += l;
+        b -= l;
+      } else if (flag == 1) {
+        lo -= l;
+      } else if (flag == 2) {
+        lo -= l;
+        b += l;
+      }
+      if (wallets.contains(tx.getPayer())) {
+        wallets[tx.getPayer()].ballance += b;
+        wallets[tx.getPayer()].lockedOut += lo;
+      } else {
+        LedgerEntity w{tx.getPayer(), b, lo, 0};
+        wallets.insert({tx.getPayer(), w});
+      }
+    }
+    if (flag == 1)
+      wallets[storage.address].ballance += tx.getFee();
   }
 
   bool scanDB() {
@@ -166,7 +221,7 @@ private:
         for (int i = 0; i < this->lastBlock.value().getData().size(); i++) {
           txspool.erase(this->lastBlock.value().getData()[i].getHash());
         }
-        updateWallets();
+        // updateWallets();
         return Ok;
       } else {
         return InsertError;
@@ -176,6 +231,11 @@ private:
     }
   }
   bool addTx(Tx &tx) {
+    if (!wallets.contains(tx.getPayer()) ||
+        (wallets[tx.getPayer()].ballance < (tx.getAmount() + tx.getFee()))) {
+      return false;
+    }
+
     if (txspool.contains(tx.getHash()))
       return true;
 
@@ -186,9 +246,15 @@ private:
       return true;
 
     txspool.insert({tx.getHash(), tx});
+    updateWallet(tx);
     return true;
   }
-  static bool cmpTxs(Tx &a, Tx &b) { return a.getFee() > b.getFee(); }
+  static bool cmpTxs(Tx &a, Tx &b) {
+    if (a.getPayer() == STORAGE_ADDR)
+      return true;
+    else
+      return a.getFee() > b.getFee();
+  }
 
 public:
   Blockchain(std::string db_name, uint diff = 1) : db{createDB(db_name)} {
@@ -236,7 +302,7 @@ public:
     // std::cout << tmp.size() << std::endl;
     // std::cout << accept.size() << std::endl;
     while (size < MAX_BLOCK_SIZE && !tmp.empty()) {
-      size += sizeof(tmp.back().getData());
+      size += tmp.back().size();
       accept.push_back(tmp.back());
       tmp.pop_back();
     }
@@ -255,6 +321,11 @@ public:
   }
 
   bool addTx(Tx &tx, std::string pubkey) {
+    if (!wallets.contains(tx.getPayer()) ||
+        (wallets[tx.getPayer()].ballance < (tx.getAmount() + tx.getFee()))) {
+      return false;
+    }
+
     if (txspool.contains(tx.getHash()))
       return true;
 
@@ -266,6 +337,7 @@ public:
 
     if (Ledger::verify(tx.getHash(), tx.getSign(), pubkey)) {
       txspool.insert({tx.getHash(), tx});
+      updateWallet(tx, 0);
       return true;
     }
     return false;
