@@ -4,10 +4,11 @@
 #include "./utils.h"
 #include "json.hpp"
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
 #include <memory>
 #include <string>
-#include <utility>
+
 namespace Mirucoin {
 struct TxEntity {
   int id;
@@ -17,6 +18,9 @@ struct TxEntity {
   float fee;
   std::string data;
   time_t timestamp;
+  std::string hash;
+  std::string sign;
+  int seed;
   std::unique_ptr<int> blockId;
 };
 
@@ -30,8 +34,22 @@ private:
   time_t timestamp;
   nlohmann::json header;
   std::string hash;
+  std::string sign;
+  int seed;
 
 public:
+  Tx() {
+    this->payer = "";
+    this->payee = "";
+    this->amount = 0;
+    this->fee = 0;
+    this->data = "";
+    this->timestamp = 0;
+    this->sign = "";
+    this->seed = std::rand();
+
+    this->updateHeader("", "");
+  }
   Tx(Tx const &a) {
     this->payer = a.payer;
     this->payee = a.payee;
@@ -39,20 +57,29 @@ public:
     this->fee = a.fee;
     this->data = a.data;
     this->timestamp = a.timestamp;
+    this->sign = a.sign;
+    this->seed = a.seed;
 
     this->updateHeader("", "");
   }
   Tx(std::string payer, std::string payee, float amount, float fee,
-     std::string data) {
+     std::string data, int seed = -1) {
     this->payer = payer;
     this->payee = payee;
     this->amount = amount;
     this->fee = fee;
     this->data = data;
     this->timestamp = std::time(nullptr);
+    this->sign = "";
+    if (seed == -1) {
+      this->seed = std::rand();
+    } else {
+      this->seed = seed;
+    }
 
     this->updateHeader("", "");
   };
+  void setSign(std::string sign) { this->sign = sign; }
   void updateHeader(std::string key = "", std::string val = "") {
     if ((key.empty() || val.empty()) && !this->hash.empty()) {
       return;
@@ -68,6 +95,7 @@ public:
         {"payer", this->payer},         {"payee", this->payee},
         {"amount", this->amount},       {"fee", this->fee},
         {"timestamp", this->timestamp}, {"data", sha256String(this->data)},
+        {"seed", this->seed},
     };
 
     this->hash = sha256String(this->header.dump());
@@ -85,6 +113,7 @@ public:
         {"payer", this->payer},         {"payee", this->payee},
         {"amount", this->amount},       {"fee", this->fee},
         {"timestamp", this->timestamp}, {"data", sha256String(this->data)},
+        {"seed", this->seed},
     };
 
     this->hash = sha256String(this->header.dump());
@@ -100,6 +129,7 @@ public:
         {"payer", this->payer},         {"payee", this->payee},
         {"amount", this->amount},       {"fee", this->fee},
         {"timestamp", this->timestamp}, {"data", sha256String(this->data)},
+        {"seed", this->seed},
     };
 
     this->hash = sha256String(this->header.dump());
@@ -111,6 +141,8 @@ public:
   const std::string &getData() const { return this->data; }
   const time_t getTimestamp() const { return this->timestamp; }
   const std::string &getHash() const { return this->hash; }
+  const std::string &getSign() const { return this->sign; }
+  const int getSeed() const { return this->seed; }
 
   nlohmann::json toJson() {
     nlohmann::json tx = {{"header", header}, {"data", data}};
@@ -120,9 +152,17 @@ public:
   std::string toString() { return this->toJson().dump(); }
 
   static Tx createTx(TxEntity *txe) {
-    Tx tx = Tx(txe->payer, txe->payee, txe->amount, txe->fee, txe->data);
+    Tx tx =
+        Tx(txe->payer, txe->payee, txe->amount, txe->fee, txe->data, txe->seed);
     tx.updateHeader("timestamp", txe->timestamp);
+    tx.setSign(txe->sign);
     return tx;
+  }
+  void print() {
+    printf("Tx: %s\n\tPayer: %s\n\tPayee: %s\n\tAmount: %f\n\tFee: "
+           "%f\n\tTimestamp: %lu\n\tSign: %s\n\tSeed: %i\n\tData: %s\n",
+           hash.c_str(), payer.c_str(), payee.c_str(), amount, fee, timestamp,
+           sign.c_str(), seed, data.c_str());
   }
 };
 

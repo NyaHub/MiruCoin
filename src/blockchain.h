@@ -2,23 +2,24 @@
 #define BLOCKCHAIN_LIB
 
 #include "./block.h"
+#include "./mirucoin.h"
 #include "./tx.h"
+#include "ledger.h"
+#include "mirucoin.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <optional>
 #include <sqlite_orm/sqlite_orm.h>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace Mirucoin {
-enum ChainStatus {
-  Ok,
-  DB_Error, // can't open database
-  VerificationError,
-  InsertError,
-};
+#define STORAGE_START_BALLANCE 1000000000
+#define MAX_BLOCK_SIZE 10 * 1024 * 1024
 
 inline auto createDB(std::string db_name) {
   return sqlite_orm::make_storage(
@@ -32,6 +33,7 @@ inline auto createDB(std::string db_name) {
           sqlite_orm::make_column("prevHash", &BlockEntity::prevHash),
           sqlite_orm::make_column("nonce", &BlockEntity::nonce),
           sqlite_orm::make_column("index", &BlockEntity::index),
+          sqlite_orm::make_column("diff", &BlockEntity::diff),
           sqlite_orm::make_column("timestamp", &BlockEntity::timestamp)),
       sqlite_orm::make_table(
           "Txs",
@@ -43,6 +45,9 @@ inline auto createDB(std::string db_name) {
           sqlite_orm::make_column("fee", &TxEntity::fee),
           sqlite_orm::make_column("data", &TxEntity::data),
           sqlite_orm::make_column("timestamap", &TxEntity::timestamp),
+          sqlite_orm::make_column("hash", &TxEntity::hash),
+          sqlite_orm::make_column("sign", &TxEntity::sign),
+          sqlite_orm::make_column("seed", &TxEntity::seed),
           sqlite_orm::make_column("blockId", &TxEntity::blockId),
           sqlite_orm::foreign_key(&TxEntity::blockId)
               .references(&BlockEntity::id)));
@@ -50,12 +55,16 @@ inline auto createDB(std::string db_name) {
 
 class Blockchain {
 private:
+  LedgerEntity storage{"Null::", STORAGE_START_BALLANCE};
+  std::unordered_map<std::string, LedgerEntity> wallets;
+  std::unordered_map<std::string, Tx> txspool;
   std::optional<Block> lastBlock;
-  int length = 0;
+  uint64_t length = 0;
   uint diff;
-  ChainStatus status = Ok;
+  Status status = Ok;
+  float miner_reward = 100;
   decltype(createDB(std::declval<std::string>())) db;
-  ChainStatus addToDB(Block *blk) {
+  Status addToDB(Block *blk) {
     try {
       db.begin_transaction();
       BlockEntity block{-1,
@@ -64,17 +73,17 @@ private:
                         blk->getPrevHash(),
                         blk->getNonce(),
                         blk->getIndex(),
+                        diff,
                         blk->getTimestamp()};
       block.id = db.insert(block);
 
       auto &txs = blk->getData();
 
-      std::cout << block.id << std::endl;
-
       for (int i = 0; i < txs.size(); i++) {
         db.insert(TxEntity{-1, txs[i].getPayer(), txs[i].getPayee(),
                            txs[i].getAmount(), txs[i].getFee(),
                            txs[i].getData(), txs[i].getTimestamp(),
+                           txs[i].getHash(), txs[i].getSign(), txs[i].getSeed(),
                            std::make_unique<int>(block.id)});
       }
       db.commit();
@@ -84,6 +93,27 @@ private:
       return DB_Error;
     }
     return Ok;
+  }
+
+  void updateWallets() {
+    auto txs = lastBlock->getData();
+    for (int i = 0; i < txs.size(); i++) {
+      if (wallets.contains(txs[i].getPayee())) {
+        wallets[txs[i].getPayee()].ballance += txs[i].getAmount();
+      } else {
+        LedgerEntity w{txs[i].getPayee(), txs[i].getAmount()};
+        wallets.insert({txs[i].getPayee(), w});
+      }
+      if (wallets.contains(txs[i].getPayer())) {
+        wallets[txs[i].getPayer()].ballance -=
+            txs[i].getAmount() - txs[i].getFee();
+      } else {
+        LedgerEntity w{txs[i].getPayer(),
+                       -txs[i].getAmount() - txs[i].getFee()};
+        wallets.insert({txs[i].getPayer(), w});
+      }
+      wallets[storage.address].ballance += txs[i].getFee();
+    }
   }
 
   bool scanDB() {
@@ -98,11 +128,13 @@ private:
         this->lastBlock = blk;
         flag = true;
         length++;
+        updateWallets();
       } else if (Block::verify(blk, lastBlock.value())) {
         this->lastBlock = blk;
         length++;
+        updateWallets();
       } else {
-        db.remove<TxEntity>(
+        db.remove_all<TxEntity>(
             sqlite_orm::where(sqlite_orm::c(&TxEntity::blockId) == blks[i].id));
         db.remove<BlockEntity>(blks[i].id);
       }
@@ -120,29 +152,21 @@ private:
 
     return txs;
   }
-
-public:
-  Blockchain(std::string db_name, uint diff = 1) : db{createDB(db_name)} {
-    db.sync_schema();
-
-    if (!scanDB()) {
-      auto blk = Block::createGenesis();
-      addBlock(blk);
-    }
-
-    this->diff = diff;
-  };
-
-  std::string getlastHash() { return lastBlock->getHash(); }
-  uint64_t getLastIndex() { return lastBlock->getIndex() + 1; }
-
-  ChainStatus addBlock(Block &blk) {
+  Status addBlock(Block &blk) {
     bool flag = length == 0 ? true : Block::verify(blk, lastBlock.value());
 
+    if (blk.getDifficulty() < 1 && Block::chekHash(blk))
+      return VerificationError;
+
     if (flag) {
-      if (this->addToDB(&blk)) {
+      auto r = this->addToDB(&blk);
+      if (r == Ok) {
         this->lastBlock = blk;
         length++;
+        for (int i = 0; i < this->lastBlock.value().getData().size(); i++) {
+          txspool.erase(this->lastBlock.value().getData()[i].getHash());
+        }
+        updateWallets();
         return Ok;
       } else {
         return InsertError;
@@ -151,16 +175,134 @@ public:
       return VerificationError;
     }
   }
+  bool addTx(Tx &tx) {
+    if (txspool.contains(tx.getHash()))
+      return true;
+
+    auto tt = db.get_all<TxEntity>(
+        sqlite_orm::where(sqlite_orm::c(&TxEntity::hash) == tx.getHash()));
+
+    if (tt.size() > 1)
+      return true;
+
+    txspool.insert({tx.getHash(), tx});
+    return true;
+  }
+  static bool cmpTxs(Tx &a, Tx &b) { return a.getFee() > b.getFee(); }
+
+public:
+  Blockchain(std::string db_name, uint diff = 1) : db{createDB(db_name)} {
+    db.sync_schema();
+
+    wallets.insert({storage.address, storage});
+
+    this->diff = diff;
+
+    if (!scanDB()) {
+      auto blk = Block::createGenesis(diff);
+      addBlock(blk);
+    }
+  };
+
+  LedgerEntity getLedger(std::string addr) {
+    if (!wallets.contains(addr)) {
+      return LedgerEntity();
+    }
+    return wallets[addr];
+  }
+
+  void createTx(std::string b) {
+    Tx tx{storage.address, b, 10, 1, ""};
+    addTx(tx);
+  }
+
+  std::string getlastHash() { return lastBlock->getHash(); }
+  uint64_t getLastIndex() { return lastBlock->getIndex() + 1; }
+
+  Block getNewBlock() {
+
+    std::vector<Tx> tmp;
+
+    for (auto &e : txspool) {
+      tmp.push_back(e.second);
+    }
+
+    std::sort(tmp.rbegin(), tmp.rend(), cmpTxs);
+
+    int size = 0;
+
+    std::vector<Tx> accept;
+
+    // std::cout << tmp.size() << std::endl;
+    // std::cout << accept.size() << std::endl;
+    while (size < MAX_BLOCK_SIZE && !tmp.empty()) {
+      size += sizeof(tmp.back().getData());
+      accept.push_back(tmp.back());
+      tmp.pop_back();
+    }
+    // std::cout << tmp.size() << std::endl;
+    // std::cout << accept.size() << std::endl;
+
+    return Block{lastBlock->getHash(), length, accept, diff};
+  }
+  Status addBlock(Block &blk, std::string miner) {
+    auto r = addBlock(blk);
+    if (r == Ok && !miner.empty()) {
+      Tx tx{storage.address, miner, miner_reward, 0, "REWARD"};
+      addTx(tx);
+    }
+    return r;
+  }
+
+  bool addTx(Tx &tx, std::string pubkey) {
+    if (txspool.contains(tx.getHash()))
+      return true;
+
+    auto tt = db.get_all<TxEntity>(
+        sqlite_orm::where(sqlite_orm::c(&TxEntity::hash) == tx.getHash()));
+
+    if (tt.size() > 1)
+      return true;
+
+    if (Ledger::verify(tx.getHash(), tx.getSign(), pubkey)) {
+      txspool.insert({tx.getHash(), tx});
+      return true;
+    }
+    return false;
+  }
+
   int getStatus() { return status; }
-  void print() {
+
+  void printChain() {
     std::vector<BlockEntity> blks = db.get_all<BlockEntity>();
 
     printf("Chain length: %lu\n", blks.size());
 
     for (int i = 0; i < blks.size(); i++) {
       auto txs = getTxsByBlkId(blks[i].id);
-      auto blk = Block::createBlock(&blks[i], std::move(txs));
+      auto blk = Block::createBlock(&blks[i], txs);
       blk.print();
+      printTxs(txs);
+    }
+    printf("Mempool size: %zu\n", txspool.size());
+  }
+  void printTxs(std::vector<Tx> &txs) {
+
+    printf("Txs count: %lu\n", txs.size());
+
+    for (int i = 0; i < txs.size(); i++) {
+      txs[i].print();
+    }
+  }
+  void printTxs(int blkId) {
+    std::vector<TxEntity> txs = db.get_all<TxEntity>(
+        sqlite_orm::where(sqlite_orm::c(&TxEntity::blockId) == blkId));
+
+    printf("Txs count: %lu\n", txs.size());
+
+    for (int i = 0; i < txs.size(); i++) {
+      auto tx = Tx::createTx(&txs[i]);
+      tx.print();
     }
   }
 };
